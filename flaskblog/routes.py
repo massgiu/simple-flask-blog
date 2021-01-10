@@ -1,29 +1,15 @@
 import secrets, os
 from PIL import Image
-from flask import render_template, url_for, flash, redirect, request
+from flask import render_template, url_for, flash, redirect, request, abort
 from flaskblog import app, db, bcrypt
-from flaskblog.forms import RegistrationForm, LoginForm, UpdateAccountForm
+from flaskblog.forms import RegistrationForm, LoginForm, UpdateAccountForm, PostForm
 from flaskblog.models import User, Post
 from flask_login import login_user, logout_user, current_user, login_required
-
-posts = [
-    {
-        'author': 'M. Giunchi',
-        'title': 'Blog post 1',
-        'content': 'First post',
-        'date_posted' : 'June 1 2020'
-    },
-    {
-        'author': 'M. Giunchi',
-        'title': 'Blog post 2',
-        'content': 'Second post',
-        'date_posted' : 'June 2 2020'
-    }
-]
 
 @app.route("/")
 @app.route("/home")
 def home():
+    posts = Post.query.all()
     return render_template('home.html',posts = posts)
 
 @app.route("/about")
@@ -88,7 +74,7 @@ def account():
     form = UpdateAccountForm()
     #on update button
     if form.validate_on_submit():
-        if form.picture.data:
+        if form.picture.data: #if are there any new data
             picture_file = save_picture(form.picture.data)
             current_user.image_file = picture_file
         current_user.username = form.username.data
@@ -103,3 +89,52 @@ def account():
         form.email.data = current_user.email
     image_file = url_for('static', filename='profile_pics/'+current_user.image_file) #profile_pics is a dir
     return render_template('account.html', title='Account', image_file=image_file, form=form)
+
+@app.route("/post/new", methods=['GET','POST']) #accepting POST and GET request
+@login_required
+def new_post():
+    form = PostForm()
+    if form.validate_on_submit():
+        post = Post(title=form.title.data, content=form.content.data, author=current_user)
+        # insert instance in db
+        db.session.add(post)
+        db.session.commit()
+        flash('You post has been created','success')
+        return redirect(url_for('home'))
+    return render_template('create_post.html', title='New Post', form= form,legend='New Post')
+
+#route to get spefic post
+@app.route("/post/<int:post_id>")
+def post(post_id):
+    post = Post.query.get_or_404(post_id) #if the post with that id doesn't exist-> 404
+    return render_template('post.html', title=post.title, post=post)
+
+@app.route("/post/<int:post_id>/update", methods=['GET','POST'])
+@login_required #this recall login
+def update_post(post_id):
+    post = Post.query.get_or_404(post_id) #if the post with that id doesn't exist-> 404
+    if post.author != current_user:
+        abort(403)
+    form = PostForm()
+    if form.validate_on_submit():
+        post.title = form.title.data
+        post.content = form.content.data
+        db.session.commit()
+        flash('Your post has been updated', 'success')
+        return redirect(url_for('post', post_id=post.id)) #redirect specific post
+    elif request.method == 'GET':
+        #Fill form with old title/content
+        form.title.data = post.title
+        form.content.data = post.content
+    return render_template('create_post.html', title='Update Post', form=form, legend='Updated Post')
+
+@app.route("/post/<int:post_id>/delete", methods=['POST','GET'])
+@login_required #this recall login
+def delete_post(post_id):
+    post = Post.query.get_or_404(post_id)  # if the post with that id doesn't exist-> 404
+    if post.author != current_user:
+        abort(403)
+    db.session.delete(post)
+    db.session.commit()
+    flash('Your post has been deleted!', 'success')
+    return redirect(url_for('home'))
